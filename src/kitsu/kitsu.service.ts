@@ -1,0 +1,243 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { AppConfig } from '../config/configuration';
+import { ExternalHttpService } from '../common/http-client.service';
+
+const MAL_SITE = 'myanimelist/anime';
+
+// ---------- Tipos JSON:API da Kitsu ----------
+
+interface KitsuAnime {
+  canonicalTitle?: string | null;
+  titles?: Record<string, string | null> | null;
+  synopsis?: string | null; // campo legado, ainda devolvido pela API
+  description?: { en?: string | null } | null;
+  posterImage?: Record<string, string | null> | null;
+  startDate?: string | null;
+  episodeCount?: number | null;
+  averageRating?: string | null;
+}
+
+interface KitsuMapping {
+  externalId?: number | string | null;
+  externalSite?: string | null;
+}
+
+interface KitsuEpisode {
+  canonicalTitle?: string | null;
+  titles?: { canonical?: string | null } | null;
+  number?: number | null;
+  originalAiredAt?: string | null;
+}
+
+interface KitsuResource {
+  id: string;
+  type: string;
+  attributes?: KitsuAnime & KitsuMapping & KitsuEpisode;
+  relationships?: Record<string, { data?: { id: string; type: string } | { id: string; type: string }[] }>;
+}
+
+interface KitsuResponse {
+  data: KitsuResource | KitsuResource[];
+  included?: KitsuResource[];
+  meta?: { count?: number };
+}
+
+export interface AnimeItemDto {
+  /** ID interno da Kitsu. */
+  kitsuId: string;
+  /** ID equivalente no MyAnimeList (nulo quando a Kitsu não tem o mapeamento). */
+  malId: number | null;
+  title: string;
+  posterUrl: string | null;
+  overview: string | null;
+  releaseYear: number | null;
+  episodesCount: number | null;
+  score: number | null;
+  genres: string[] | null;
+}
+
+export interface AnimeStreamDto {
+  status: 'success';
+  data: {
+    kitsuId: string;
+    malId: number;
+    episode: number;
+    embedUrl: string;
+  };
+}
+
+@Injectable()
+export class KitsuService {
+  constructor(
+    private readonly http: ExternalHttpService,
+    private readonly config: ConfigService<AppConfig, true>,
+  ) {}
+
+  /** Animes mais populares (ordenados por userCount) — equivalente ao "top". */
+  async topAnime(page = 1): Promise<{ page: number; totalPages: number | null; items: AnimeItemDto[] }> {
+    const path = `/anime?sort=-userCount&filter[ageRating]=G,PG,R&${this.pageQuery(page)}`;
+    const res = await this.fetch(path);
+    if (!res) throw new NotFoundException('Animes indisponíveis na Kitsu.');
+    return this.toPaged(res, page);
+  }
+
+  /** Animes da temporada atual (estação + ano correntes). */
+  async seasonNow(page = 1) {
+    const { season, year } = this.currentSeason();
+    const path = `/anime?filter[season]=${season}&filter[seasonYear]=${year}&sort=-userCount&${this.pageQuery(page)}`;
+    const res = await this.fetch(path);
+    if (!res) throw new NotFoundException('Temporada atual indisponível na Kitsu.');
+    return this.toPaged(res, page);
+  }
+
+  /** Pesquisa de animes por nome. */
+  async search(q: string, page = 1) {
+    const encoded = encodeURIComponent(q.trim());
+    const path = `/anime?filter[text]=${encoded}&${this.pageQuery(page)}`;
+    const res = await this.fetch(path);
+    if (!res) throw new NotFoundException('Pesquisa de anime sem resultados.');
+    return this.toPaged(res, page);
+  }
+
+  /** Detalhes de um anime por kitsuId, incluindo gêneros e mapeamento MAL. */
+  async detail(id: string): Promise<AnimeItemDto> {
+    const res = await this.fetch(`/anime/${id}?include=mappings,genres`);
+    if (!res) throw new NotFoundException('Anime não encontrado.');
+    const [docs, included] = this.splitDocument(res);
+    const item = docs[0] ? this.toItem(docs[0], included) : null;
+    if (!item) throw new NotFoundException('Anime não encontrado.');
+    return item;
+  }
+
+  /** Episódios de um anime (título, número e data de exibição). */
+  async episodes(id: string, page = 1) {
+    const res = await this.fetch(`/anime/${id}/episodes?${this.pageQuery(page)}`);
+    if (!res) throw new NotFoundException('Episódios não encontrados.');
+    const list = Array.isArray(res.data) ? res.data : [];
+    return {
+      page,
+      items: list.map((e) => {
+        const a = e.attributes ?? {};
+        const num = a.number ?? 0;
+        return {
+          episodeNumber: num,
+          title: a.canonicalTitle || a.titles?.canonical || (num ? `Episódio ${num}` : 'Episódio'),
+          airDate: a.originalAiredAt ?? null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Streaming: recebe o kitsuId + episódio, resolve o mapeamento interno
+   * Kitsu → MyAnimeList e devolve a URL de embed do VidSrc para a WebView.
+   */
+  async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
+    const kitsuId = String(kitsuIdRaw);
+    const kit = await this.fetch(`/anime/${kitsuId}?include=mappings`);
+    if (!kit) throw new NotFoundException('Anime não encontrado no Kitsu.');
+
+    const attrs = (kit.data as KitsuResource).attributes;
+    if (attrs?.episodeCount && episode > attrs.episodeCount) {
+      throw new NotFoundException('Episódio não disponível para exibição.');
+    }
+
+    const malId = this.extractMalId(...this.splitDocument(kit));
+    if (!malId) {
+      throw new NotFoundException('Mapeamento para MyAnimeList indisponível para este anime.');
+    }
+
+    const embedUrl = `${this.vidsrcBaseUrl()}/anime/${malId}/${episode}`;
+    return { status: 'success', data: { kitsuId, malId, episode, embedUrl } };
+  }
+
+  // ---------- Internos ----------
+
+  private baseUrl(): string {
+    return this.config.get('kitsu')?.baseUrl ?? 'https://kitsu.io/api/edge';
+  }
+
+  private vidsrcBaseUrl(): string {
+    return this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.icu/embed';
+  }
+
+  /** Paginação estilo JSON:API (offset 0-based) — página 1 => offset 0. */
+  private pageQuery(page: number, limit = 20): string {
+    const offset = (Math.max(page, 1) - 1) * limit;
+    return `page[limit]=${limit}&page[offset]=${offset}`;
+  }
+
+  private currentSeason(): { season: string; year: number } {
+    const seasons = ['winter', 'spring', 'summer', 'fall'];
+    const now = new Date();
+    return { season: seasons[Math.floor(now.getMonth() / 3)], year: now.getFullYear() };
+  }
+
+  private async fetch(path: string): Promise<KitsuResponse | null> {
+    return this.http.get<KitsuResponse>(`${this.baseUrl()}${path}`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+  }
+
+  /** Normaliza single vs collection document em [cards, included]. */
+  private splitDocument(res: KitsuResponse): [KitsuResource[], KitsuResource[]] {
+    const data = Array.isArray(res.data) ? res.data : [res.data];
+    return [data, res.included ?? []];
+  }
+
+  /**
+   * Extrai o mal_id a partir das mappings da Kitsu:
+   * meta relacional em `data` + recursos `mappings` em `included`.
+   */
+  private extractMalId(docs: KitsuResource[], included: KitsuResource[]): number | null {
+    const wanted = new Set<string>();
+    for (const doc of docs) {
+      const rel = doc.relationships?.mappings?.data;
+      for (const ref of Array.isArray(rel) ? rel : [rel]) {
+        if (ref?.type === 'mappings') wanted.add(ref.id);
+      }
+    }
+    const candidates = included.filter((i) => i.type === 'mappings' && wanted.has(i.id));
+    const hit = candidates.find((i) => i.attributes?.externalSite === MAL_SITE);
+    const fallback = candidates.find((i) => i.attributes?.externalSite?.startsWith('myanimelist/'));
+    const id = hit?.attributes?.externalId ?? fallback?.attributes?.externalId ?? null;
+    return id != null ? Number(id) : null;
+  }
+
+  /** Converte resposta paginada em { page, totalPages, items }. */
+  private toPaged(res: KitsuResponse, page: number) {
+    const [docs, included] = this.splitDocument(res);
+    const count = res.meta?.count;
+    return {
+      page,
+      totalPages: count ? Math.ceil(count / 20) : null,
+      items: docs
+        .map((doc) => this.toItem(doc, included))
+        .filter((i): i is AnimeItemDto => i !== null),
+    };
+  }
+
+  /** Mapeia um recurso Kitsu para o DTO usado pelo app. */
+  private toItem(doc: KitsuResource, included: KitsuResource[] = []): AnimeItemDto | null {
+    const a = doc.attributes;
+    if (!a) return null;
+    const hasGenres = included.some((i) => i.type === 'genres');
+    const genres = hasGenres
+      ? included.filter((i) => i.type === 'genres').map((g) => (g.attributes as { name?: string }).name ?? '')
+      : null;
+    const year = a.startDate ? Number(String(a.startDate).slice(0, 4)) : null;
+    const rating = a.averageRating ? Number(a.averageRating) / 10 : null;
+    return {
+      kitsuId: doc.id,
+      malId: this.extractMalId([doc], included),
+      title: (a.titles?.en || a.titles?.en_us || a.canonicalTitle || a.titles?.en_jp || 'Sem título').trim(),
+      posterUrl: a.posterImage?.large || a.posterImage?.medium || a.posterImage?.small || null,
+      overview: a.synopsis ?? a.description?.en ?? null,
+      releaseYear: Number.isNaN(year) ? null : year,
+      episodesCount: a.episodeCount ?? null,
+      score: rating && !Number.isNaN(rating) ? Number(rating.toFixed(2)) : null,
+      genres: genres && genres.length ? genres.filter(Boolean) : null,
+    };
+  }
+}
