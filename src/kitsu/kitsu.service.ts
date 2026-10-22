@@ -132,7 +132,7 @@ export class KitsuService {
 
   /**
    * Streaming: recebe o kitsuId + episódio, resolve o mapeamento interno
-   * Kitsu → MyAnimeList e devolve a URL de embed do VidSrc para a WebView.
+   * Kitsu → MyAnimeList e devolve a URL de embed do VidSrc.cc para a WebView.
    */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
@@ -149,7 +149,7 @@ export class KitsuService {
       throw new NotFoundException('Mapeamento para MyAnimeList indisponível para este anime.');
     }
 
-    // URL formatada corretamente para animes via ID do MyAnimeList no VidSrc
+    // Endpoint funcional para animes mapeados via ID MyAnimeList
     const embedUrl = `${this.vidsrcBaseUrl()}/anime/${malId}/${episode}`;
     return { status: 'success', data: { kitsuId, malId, episode, embedUrl } };
   }
@@ -161,8 +161,8 @@ export class KitsuService {
   }
 
   private vidsrcBaseUrl(): string {
-    // Domínio ativo do VidSrc
-    return this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to/embed';
+    // Servidor vidsrc.cc otimizado para resolver IDs do MyAnimeList
+    return this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.cc/v2/embed';
   }
 
   /** Paginação estilo JSON:API (offset 0-based) — página 1 => offset 0. */
