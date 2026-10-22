@@ -10,7 +10,6 @@ import { IptvService } from './iptv.service';
 export class IptvController {
   constructor(private readonly iptv: IptvService) {}
 
-  /** Sincronização da lista M3U com a base de dados — rota protegida por ADMIN_SYNC_KEY. */
   @Post('sync')
   @HttpCode(200)
   @UseGuards(AdminKeyGuard)
@@ -20,7 +19,6 @@ export class IptvController {
     return this.iptv.sync();
   }
 
-  /** Canais paginados/filtrados — é isto que o Flutter chama. */
   @Get('channels')
   channels(@Query() query: ChannelQueryDto) {
     return this.iptv.listChannels(query);

@@ -17,11 +17,6 @@ export class IptvService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
-  /**
-   * Faz download da lista M3U gigante, faz parsing, filtra por país
-   * (env IPTV_ALLOWED_COUNTRIES) e grava na PostgreSQL em chunks.
-   * Upsert por stream_url evita duplicados a cada sync.
-   */
   async sync(): Promise<SyncResultDto> {
     const start = Date.now();
     this.logger.log('A iniciar sincronização da lista IPTV...');
@@ -31,7 +26,6 @@ export class IptvService {
     let entries: M3uEntry[] = parseM3U(content);
     this.logger.log(`Parsing concluído: ${entries.length} entradas encontradas.`);
 
-    // filtro de país configurado (IPTV_ALLOWED_COUNTRIES='PT,BR,')
     const allowed = (process.env.IPTV_ALLOWED_COUNTRIES || '')
       .split(',')
       .map((c) => c.trim().toUpperCase())
@@ -47,20 +41,60 @@ export class IptvService {
       this.logger.log(`Batch limit aplicado: ${entries.length} entradas.`);
     }
 
-    const inserted = await this.bulkUpsert(entries);
+    // Health check para remover links com erro 403 / 404 / 504
+    this.logger.log('A testar disponibilidade dos canais ao vivo...');
+    const validEntries: M3uEntry[] = [];
+    const VALIDATION_CONCURRENCY = 15;
+
+    for (let i = 0; i < entries.length; i += VALIDATION_CONCURRENCY) {
+      const batch = entries.slice(i, i + VALIDATION_CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (entry) => {
+          const isAlive = await this.checkStreamHealth(entry.streamUrl);
+          return isAlive ? entry : null;
+        }),
+      );
+      validEntries.push(...results.filter((e): e is M3uEntry => e !== null));
+    }
+
+    this.logger.log(`Health Check concluído: ${validEntries.length} de ${entries.length} canais ativos.`);
+
+    const inserted = await this.bulkUpsert(validEntries);
     const durationMs = Date.now() - start;
-    this.logger.log(`Sync concluído em ${durationMs}ms: ${inserted} novos canais inseridos.`);
+    this.logger.log(`Sync concluído em ${durationMs}ms: ${inserted} novos canais salvos.`);
 
     return {
       total: entries.length,
       inserted,
-      skipped: entries.length - inserted,
+      skipped: entries.length - validEntries.length,
       durationMs,
     };
   }
 
-  /** Upsert em blocos de 500 (evitando queries gigantes no Neon). */
+  private async checkStreamHealth(url: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+          Accept: '*/*',
+        },
+      });
+      clearTimeout(timeout);
+      return res.ok || res.status === 206;
+    } catch {
+      clearTimeout(timeout);
+      return false;
+    }
+  }
+
   private async bulkUpsert(entries: M3uEntry[]): Promise<number> {
+    if (entries.length === 0) return 0;
     const CHUNK = 500;
     let inserted = 0;
     for (let i = 0; i < entries.length; i += CHUNK) {
@@ -69,9 +103,7 @@ export class IptvService {
       const placeholders: string[] = [];
       chunk.forEach((c, idx) => {
         const base = idx * 5;
-        placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`,
-        );
+        placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`);
         values.push(c.name, c.logoUrl, c.category, c.country, c.streamUrl);
       });
       const sql = `
@@ -89,8 +121,6 @@ export class IptvService {
     }
     return inserted;
   }
-
-  // ------------------ Listagem para o Flutter ------------------
 
   async listChannels(query: ChannelQueryDto) {
     const qb = this.channelsRepository
