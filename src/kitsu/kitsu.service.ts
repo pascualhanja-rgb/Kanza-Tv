@@ -5,8 +5,6 @@ import { ExternalHttpService } from '../common/http-client.service';
 
 const MAL_SITE = 'myanimelist/anime';
 
-// ---------- Tipos JSON:API da Kitsu ----------
-
 interface KitsuAnime {
   canonicalTitle?: string | null;
   titles?: Record<string, string | null> | null;
@@ -135,11 +133,25 @@ export class KitsuService {
       throw new NotFoundException('Episódio não disponível para exibição.');
     }
 
-    const malId = this.extractMalId(...this.splitDocument(kit));
-    const targetId = malId || kitsuId;
+    const [docs, included] = this.splitDocument(kit);
+    const malId = this.extractMalId(docs, included);
 
-    // Rota direta de embed para animes
-    const embedUrl = `https://vidsrc.cc/v2/embed/anime/${targetId}/${episode}`;
+    // Extrai o IMDb ID para compatibilidade com a API de dublados/legendados do SuperFlix
+    const imdbMapping = included.find(
+      (i) => i.type === 'mappings' && i.attributes?.externalSite?.startsWith('imdb'),
+    );
+    const imdbId = imdbMapping?.attributes?.externalId
+      ? String(imdbMapping.attributes.externalId)
+      : null;
+
+    let embedUrl = '';
+    if (imdbId) {
+      const cleanImdb = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
+      embedUrl = `https://superflixhd.epizy.com/embed-2/?type=tvshows&imdb=${cleanImdb}`;
+    } else {
+      const fallbackId = malId || kitsuId;
+      embedUrl = `https://vidsrc.pro/embed/tv/${fallbackId}/1/${episode}`;
+    }
 
     return {
       status: 'success',
@@ -151,8 +163,6 @@ export class KitsuService {
       },
     };
   }
-
-  // ---------- Internos ----------
 
   private baseUrl(): string {
     return this.config.get('kitsu')?.baseUrl ?? 'https://kitsu.io/api/edge';
