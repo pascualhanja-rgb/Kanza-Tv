@@ -145,7 +145,7 @@ export class KitsuService {
       embedUrl = `https://superflixapi.top/tv/${imdbId}/1/${episode}`;
     } else {
       const fallbackId = malId || kitsuId;
-      embedUrl = `https://embed.warezcdn.com/serie/${fallbackId}/1/${episode}`;
+      embedUrl = `https://warezcdn.sbs/serie/${fallbackId}/1/${episode}`;
     }
 
     return {
