@@ -64,7 +64,7 @@ export interface AnimeStreamDto {
     kitsuId: string;
     malId: number | null;
     episode: number;
-    embedUrl: string; // URL da transmissão HLS (.m3u8) ou embed de fallback
+    embedUrl: string;
   };
 }
 
@@ -75,7 +75,7 @@ export class KitsuService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  /** Animes mais populares (ordenados por userCount). */
+  /** Animes mais populares (ordenados por userCount) */
   async topAnime(page = 1): Promise<{ page: number; totalPages: number | null; items: AnimeItemDto[] }> {
     const path = `/anime?sort=-userCount&filter[ageRating]=G,PG,R&${this.pageQuery(page)}`;
     const res = await this.fetch(path);
@@ -83,7 +83,7 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Animes da temporada atual. */
+  /** Animes da temporada atual */
   async seasonNow(page = 1) {
     const { season, year } = this.currentSeason();
     const path = `/anime?filter[season]=${season}&filter[seasonYear]=${year}&sort=-userCount&${this.pageQuery(page)}`;
@@ -92,7 +92,7 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Pesquisa de animes por nome. */
+  /** Pesquisa de animes por nome */
   async search(q: string, page = 1) {
     const encoded = encodeURIComponent(q.trim());
     const path = `/anime?filter[text]=${encoded}&${this.pageQuery(page)}`;
@@ -101,7 +101,7 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Detalhes de um anime por kitsuId. */
+  /** Detalhes de um anime por kitsuId */
   async detail(id: string): Promise<AnimeItemDto> {
     const res = await this.fetch(`/anime/${id}?include=mappings,genres`);
     if (!res) throw new NotFoundException('Anime não encontrado.');
@@ -111,7 +111,7 @@ export class KitsuService {
     return item;
   }
 
-  /** Lista de episódios de um anime. */
+  /** Episódios de um anime */
   async episodes(id: string, page = 1) {
     const res = await this.fetch(`/anime/${id}/episodes?${this.pageQuery(page)}`);
     if (!res) throw new NotFoundException('Episódios não encontrados.');
@@ -131,7 +131,7 @@ export class KitsuService {
   }
 
   /**
-   * Extração estilo Tomato: Busca o fluxo .m3u8 no scraper e gera o link HLS nativo.
+   * Método de Streaming Resiliente com Tratamento de Erros e Fallbacks
    */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
@@ -146,7 +146,7 @@ export class KitsuService {
     const malId = this.extractMalId(...this.splitDocument(kit));
     const title = attrs?.canonicalTitle || attrs?.titles?.en || 'Anime';
 
-    // Tentativa via Consumet API (HLS Direct igual ao Tomato)
+    // 1. TENTATIVA HLS: Consumet API (Tratando erro 451 para não quebrar)
     try {
       const searchRes = await this.http.get<any>(
         `https://api.consumet.org/anime/gogoanime/${encodeURIComponent(title)}`,
@@ -167,12 +167,12 @@ export class KitsuService {
         }
       }
     } catch {
-      // Fallback em caso de falha da API externa
+      // Ignora erro 451 / timeout e avança de forma transparente
     }
 
-    // Embed de fallback confiável com rota de TV
-    const fallbackId = malId || kitsuId;
-    const embedUrl = `https://vidsrc.to/embed/tv/${fallbackId}/1/${episode}`;
+    // 2. FALLBACK 1: VidSrc TV Embed Route (Maior taxa de sucesso para animes)
+    const activeMalId = malId || kitsuId;
+    const embedUrl = `https://vidsrc.to/embed/tv/${activeMalId}/1/${episode}`;
 
     return {
       status: 'success',
