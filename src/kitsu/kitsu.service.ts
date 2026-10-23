@@ -139,14 +139,10 @@ export class KitsuService {
     const malId = this.extractMalId(docs, included);
     const imdbId = this.extractImdbId(docs, included);
 
-    // Servidor Primário: SuperFlix API (Dublado PT-BR e Legendado por IMDb ID)
-    let embedUrl = '';
-    if (imdbId) {
-      embedUrl = `https://superflixapi.top/tv/${imdbId}/1/${episode}`;
-    } else {
-      const fallbackId = malId || kitsuId;
-      embedUrl = `https://warezcdn.sbs/serie/${fallbackId}/1/${episode}`;
-    }
+    const targetId = imdbId || malId || kitsuId;
+
+    // Provedor principal com a estrutura ativada do WarezCDN
+    const embedUrl = `https://warezcdn.sbs/serie/${targetId}/1/${episode}`;
 
     return {
       status: 'success',
