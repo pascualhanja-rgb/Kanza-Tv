@@ -7,24 +7,23 @@ export class AnimeResolverService {
 
   constructor(private readonly http: ExternalHttpService) {}
 
-  /**
-   * Tenta extrair a URL direta (.m3u8 ou .mp4) a partir dos fornecedores ativos.
-   */
-  async resolveStreamUrl(targetId: string, episode: number): Promise<string | null> {
-    // 1. Tentar resolver via WarezCDN (.sbs)
-    const warezUrl = await this.resolveWarezCDN(targetId, episode);
+  async resolveStreamUrl(imdbId: string | null, episode: number): Promise<string | null> {
+    if (!imdbId || !imdbId.startsWith('tt')) {
+      return null; // Evita enviar IDs incorretos como o MAL ID
+    }
+
+    const warezUrl = await this.resolveWarezCDN(imdbId, episode);
     if (warezUrl) return warezUrl;
 
-    // 2. Tentar resolver via SuperFlix API
-    const superflixUrl = await this.resolveSuperFlix(targetId, episode);
+    const superflixUrl = await this.resolveSuperFlix(imdbId, episode);
     if (superflixUrl) return superflixUrl;
 
     return null;
   }
 
-  private async resolveWarezCDN(targetId: string, episode: number): Promise<string | null> {
+  private async resolveWarezCDN(imdbId: string, episode: number): Promise<string | null> {
     try {
-      const pageUrl = `https://warezcdn.sbs/serie/${targetId}/1/${episode}`;
+      const pageUrl = `https://warezcdn.sbs/serie/${imdbId}/1/${episode}`;
       const html = await this.http.get<string>(pageUrl, {
         headers: {
           'User-Agent':
@@ -34,22 +33,18 @@ export class AnimeResolverService {
       });
 
       if (!html) return null;
-
-      // Procura padrões de playlist HLS (.m3u8) no HTML/JS da página
       const match = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
-      if (match && match[1]) {
-        return match[1];
-      }
+      return match ? match[1] : null;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Falha ao resolver WarezCDN para ID ${targetId}: ${message}`);
+      this.logger.warn(`Falha ao resolver WarezCDN para ${imdbId}: ${message}`);
+      return null;
     }
-    return null;
   }
 
-  private async resolveSuperFlix(targetId: string, episode: number): Promise<string | null> {
+  private async resolveSuperFlix(imdbId: string, episode: number): Promise<string | null> {
     try {
-      const pageUrl = `https://superflixapi.top/tv/${targetId}/1/${episode}`;
+      const pageUrl = `https://superflixapi.top/tv/${imdbId}/1/${episode}`;
       const html = await this.http.get<string>(pageUrl, {
         headers: {
           'User-Agent':
@@ -59,15 +54,12 @@ export class AnimeResolverService {
       });
 
       if (!html) return null;
-
       const match = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
-      if (match && match[1]) {
-        return match[1];
-      }
+      return match ? match[1] : null;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Falha ao resolver SuperFlix para ID ${targetId}: ${message}`);
+      this.logger.warn(`Falha ao resolver SuperFlix para ${imdbId}: ${message}`);
+      return null;
     }
-    return null;
   }
 }

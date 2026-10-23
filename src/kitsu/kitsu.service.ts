@@ -142,13 +142,14 @@ export class KitsuService {
     const malId = this.extractMalId(docs, included);
     const imdbId = this.extractImdbId(docs, included);
 
-    const targetId = imdbId || (malId ? String(malId) : kitsuId);
+    if (!imdbId) {
+      throw new NotFoundException('Este anime não possui mapeamento IMDb válido para reprodução.');
+    }
 
-    // Tenta obter o link de fluxo direto HLS (.m3u8)
-    const directHlsUrl = await this.resolver.resolveStreamUrl(targetId, episode);
+    const directHlsUrl = await this.resolver.resolveStreamUrl(imdbId, episode);
 
     const isDirectHls = Boolean(directHlsUrl);
-    const embedUrl = directHlsUrl || `https://warezcdn.sbs/serie/${targetId}/1/${episode}`;
+    const embedUrl = directHlsUrl || `https://warezcdn.sbs/serie/${imdbId}/1/${episode}`;
 
     return {
       status: 'success',
