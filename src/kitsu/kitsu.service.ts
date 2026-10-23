@@ -62,9 +62,9 @@ export interface AnimeStreamDto {
   status: 'success';
   data: {
     kitsuId: string;
-    malId: number;
+    malId: number | null;
     episode: number;
-    embedUrl: string;
+    embedUrl: string; // URL da transmissão HLS (.m3u8) ou embed de fallback
   };
 }
 
@@ -75,7 +75,7 @@ export class KitsuService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  /** Animes mais populares (ordenados por userCount) — equivalente ao "top". */
+  /** Animes mais populares (ordenados por userCount). */
   async topAnime(page = 1): Promise<{ page: number; totalPages: number | null; items: AnimeItemDto[] }> {
     const path = `/anime?sort=-userCount&filter[ageRating]=G,PG,R&${this.pageQuery(page)}`;
     const res = await this.fetch(path);
@@ -83,7 +83,7 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Animes da temporada atual (estação + ano correntes). */
+  /** Animes da temporada atual. */
   async seasonNow(page = 1) {
     const { season, year } = this.currentSeason();
     const path = `/anime?filter[season]=${season}&filter[seasonYear]=${year}&sort=-userCount&${this.pageQuery(page)}`;
@@ -101,7 +101,7 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Detalhes de um anime por kitsuId, incluindo gêneros e mapeamento MAL. */
+  /** Detalhes de um anime por kitsuId. */
   async detail(id: string): Promise<AnimeItemDto> {
     const res = await this.fetch(`/anime/${id}?include=mappings,genres`);
     if (!res) throw new NotFoundException('Anime não encontrado.');
@@ -111,7 +111,7 @@ export class KitsuService {
     return item;
   }
 
-  /** Episódios de um anime (título, número e data de exibição). */
+  /** Lista de episódios de um anime. */
   async episodes(id: string, page = 1) {
     const res = await this.fetch(`/anime/${id}/episodes?${this.pageQuery(page)}`);
     if (!res) throw new NotFoundException('Episódios não encontrados.');
@@ -131,8 +131,7 @@ export class KitsuService {
   }
 
   /**
-   * Streaming: recebe o kitsuId + episódio, resolve o mapeamento interno
-   * Kitsu → MyAnimeList e devolve a URL de embed otimizada para o VidSrc.
+   * Extração estilo Tomato: Busca o fluxo .m3u8 no scraper e gera o link HLS nativo.
    */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
@@ -145,13 +144,40 @@ export class KitsuService {
     }
 
     const malId = this.extractMalId(...this.splitDocument(kit));
-    if (!malId) {
-      throw new NotFoundException('Mapeamento para MyAnimeList indisponível para este anime.');
+    const title = attrs?.canonicalTitle || attrs?.titles?.en || 'Anime';
+
+    // Tentativa via Consumet API (HLS Direct igual ao Tomato)
+    try {
+      const searchRes = await this.http.get<any>(
+        `https://api.consumet.org/anime/gogoanime/${encodeURIComponent(title)}`,
+      );
+      const animeId = searchRes?.results?.[0]?.id;
+
+      if (animeId) {
+        const streamRes = await this.http.get<any>(
+          `https://api.consumet.org/anime/gogoanime/watch/${animeId}-episode-${episode}`,
+        );
+        const hlsSource = streamRes?.sources?.find((s: any) => s.isM3U8) || streamRes?.sources?.[0];
+
+        if (hlsSource?.url) {
+          return {
+            status: 'success',
+            data: { kitsuId, malId, episode, embedUrl: hlsSource.url },
+          };
+        }
+      }
+    } catch {
+      // Fallback em caso de falha da API externa
     }
 
-    // URL formatada com a rota de TV compatível com o catálogo do VidSrc
-    const embedUrl = `https://vidsrc.to/embed/tv/${malId}/1/${episode}`;
-    return { status: 'success', data: { kitsuId, malId: Number(malId), episode, embedUrl } };
+    // Embed de fallback confiável com rota de TV
+    const fallbackId = malId || kitsuId;
+    const embedUrl = `https://vidsrc.to/embed/tv/${fallbackId}/1/${episode}`;
+
+    return {
+      status: 'success',
+      data: { kitsuId, malId, episode, embedUrl },
+    };
   }
 
   // ---------- Internos ----------
@@ -160,7 +186,6 @@ export class KitsuService {
     return this.config.get('kitsu')?.baseUrl ?? 'https://kitsu.io/api/edge';
   }
 
-  /** Paginação estilo JSON:API (offset 0-based) — página 1 => offset 0. */
   private pageQuery(page: number, limit = 20): string {
     const offset = (Math.max(page, 1) - 1) * limit;
     return `page[limit]=${limit}&page[offset]=${offset}`;
@@ -178,16 +203,11 @@ export class KitsuService {
     });
   }
 
-  /** Normaliza single vs collection document em [cards, included]. */
   private splitDocument(res: KitsuResponse): [KitsuResource[], KitsuResource[]] {
     const data = Array.isArray(res.data) ? res.data : [res.data];
     return [data, res.included ?? []];
   }
 
-  /**
-   * Extrai o mal_id a partir das mappings da Kitsu:
-   * meta relacional em `data` + recursos `mappings` em `included`.
-   */
   private extractMalId(docs: KitsuResource[], included: KitsuResource[]): number | null {
     const wanted = new Set<string>();
     for (const doc of docs) {
@@ -203,7 +223,6 @@ export class KitsuService {
     return id != null ? Number(id) : null;
   }
 
-  /** Converte resposta paginada em { page, totalPages, items }. */
   private toPaged(res: KitsuResponse, page: number) {
     const [docs, included] = this.splitDocument(res);
     const count = res.meta?.count;
@@ -216,7 +235,6 @@ export class KitsuService {
     };
   }
 
-  /** Mapeia um recurso Kitsu para o DTO usado pelo app. */
   private toItem(doc: KitsuResource, included: KitsuResource[] = []): AnimeItemDto | null {
     const a = doc.attributes;
     if (!a) return null;
