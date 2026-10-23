@@ -131,7 +131,7 @@ export class KitsuService {
   }
 
   /**
-   * Método de Streaming limpo e otimizado (sem chamadas inválidas ao TMDB)
+   * Método de Streaming direto e fiável para animes
    */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
@@ -144,10 +144,10 @@ export class KitsuService {
     }
 
     const malId = this.extractMalId(...this.splitDocument(kit));
-
-    // Utiliza diretamente o ID do MyAnimeList (ou ID da Kitsu como fallback)
     const targetId = malId || kitsuId;
-    const embedUrl = `https://vidsrc.to/embed/tv/${targetId}/1/${episode}`;
+
+    // Rota direta de embed de anime baseada em ID MyAnimeList / Kitsu
+    const embedUrl = `https://vidsrc.cc/v2/embed/anime/${targetId}/${episode}`;
 
     return {
       status: 'success',
