@@ -131,7 +131,7 @@ export class KitsuService {
   }
 
   /**
-   * Método de Streaming Resiliente com Tratamento de Erros e Fallbacks
+   * Método de Streaming limpo e otimizado (sem chamadas inválidas ao TMDB)
    */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
@@ -144,39 +144,19 @@ export class KitsuService {
     }
 
     const malId = this.extractMalId(...this.splitDocument(kit));
-    const title = attrs?.canonicalTitle || attrs?.titles?.en || 'Anime';
 
-    // 1. TENTATIVA HLS: Consumet API (Tratando erro 451 para não quebrar)
-    try {
-      const searchRes = await this.http.get<any>(
-        `https://api.consumet.org/anime/gogoanime/${encodeURIComponent(title)}`,
-      );
-      const animeId = searchRes?.results?.[0]?.id;
-
-      if (animeId) {
-        const streamRes = await this.http.get<any>(
-          `https://api.consumet.org/anime/gogoanime/watch/${animeId}-episode-${episode}`,
-        );
-        const hlsSource = streamRes?.sources?.find((s: any) => s.isM3U8) || streamRes?.sources?.[0];
-
-        if (hlsSource?.url) {
-          return {
-            status: 'success',
-            data: { kitsuId, malId, episode, embedUrl: hlsSource.url },
-          };
-        }
-      }
-    } catch {
-      // Ignora erro 451 / timeout e avança de forma transparente
-    }
-
-    // 2. FALLBACK 1: VidSrc TV Embed Route (Maior taxa de sucesso para animes)
-    const activeMalId = malId || kitsuId;
-    const embedUrl = `https://vidsrc.to/embed/tv/${activeMalId}/1/${episode}`;
+    // Utiliza diretamente o ID do MyAnimeList (ou ID da Kitsu como fallback)
+    const targetId = malId || kitsuId;
+    const embedUrl = `https://vidsrc.to/embed/tv/${targetId}/1/${episode}`;
 
     return {
       status: 'success',
-      data: { kitsuId, malId, episode, embedUrl },
+      data: {
+        kitsuId,
+        malId,
+        episode,
+        embedUrl,
+      },
     };
   }
 
