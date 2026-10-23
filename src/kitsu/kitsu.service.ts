@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
 import { ExternalHttpService } from '../common/http-client.service';
+import { AnimeResolverService } from './anime-resolver.service';
 
 const MAL_SITE = 'myanimelist/anime';
 
@@ -65,6 +66,7 @@ export interface AnimeStreamDto {
     imdbId: string | null;
     episode: number;
     embedUrl: string;
+    isDirectHls: boolean;
   };
 }
 
@@ -73,6 +75,7 @@ export class KitsuService {
   constructor(
     private readonly http: ExternalHttpService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly resolver: AnimeResolverService,
   ) {}
 
   async topAnime(page = 1): Promise<{ page: number; totalPages: number | null; items: AnimeItemDto[] }> {
@@ -139,10 +142,13 @@ export class KitsuService {
     const malId = this.extractMalId(docs, included);
     const imdbId = this.extractImdbId(docs, included);
 
-    const targetId = imdbId || malId || kitsuId;
+    const targetId = imdbId || (malId ? String(malId) : kitsuId);
 
-    // Provedor principal com a estrutura ativada do WarezCDN
-    const embedUrl = `https://warezcdn.sbs/serie/${targetId}/1/${episode}`;
+    // Tenta obter o link de fluxo direto HLS (.m3u8)
+    const directHlsUrl = await this.resolver.resolveStreamUrl(targetId, episode);
+
+    const isDirectHls = Boolean(directHlsUrl);
+    const embedUrl = directHlsUrl || `https://warezcdn.sbs/serie/${targetId}/1/${episode}`;
 
     return {
       status: 'success',
@@ -152,6 +158,7 @@ export class KitsuService {
         imdbId,
         episode,
         embedUrl,
+        isDirectHls,
       },
     };
   }
