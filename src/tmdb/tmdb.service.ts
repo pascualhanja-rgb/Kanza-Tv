@@ -78,6 +78,17 @@ interface CacheEntry {
   expiresAt: number;
 }
 
+function tmdbPath(type: MediaType): string {
+  switch (type) {
+    case 'MOVIE':
+      return 'movie';
+    case 'SERIES':
+    case 'ANIME':
+    case 'SOAP_OPERA':
+      return 'tv';
+  }
+}
+
 @Injectable()
 export class TmdbService {
   private readonly cache = new Map<string, CacheEntry>();
@@ -143,8 +154,7 @@ export class TmdbService {
 
   /**
    * Lista de temporadas REAIS de uma série, extraída do array `seasons` do
-   * GET /tv/{id} da TMDB. Evita adivinhar temporadas com requests em loop
-   * (que gerava dezenas de 404 e congestionava o processamento).
+   * GET /tv/{id} da TMDB. Evita adivinhar temporadas com requests em loop.
    */
   async seriesSeasons(id: number): Promise<{ tmdbId: number; seasons: SeasonDto[] }> {
     const data = await this.fetchRaw<TmdbItem>(`/tv/${id}`, true);
@@ -162,11 +172,6 @@ export class TmdbService {
     };
   }
 
-  /**
-   * Lista de temporadas REAIS de uma série, extraída do array `seasons` do
-   * GET /tv/{id} da TMDB. Evita adivinhar temporadas com requests em loop
-   * (que gerava dezenas de 404 e congestionava o processamento).
-   */
   // ---------- Animes (TMDB - Animação do Japão) ----------
 
   async animePopular(page = 1): Promise<PagedResult> {
@@ -188,6 +193,10 @@ export class TmdbService {
     const data = await this.fetchRaw<TmdbItem>(`/tv/${id}`, true);
     if (!data) throw new NotFoundException('Anime não encontrado na TMDB.');
     return this.toDetail(data, 'ANIME');
+  }
+
+  async animeSeasons(id: number): Promise<{ tmdbId: number; seasons: SeasonDto[] }> {
+    return this.seriesSeasons(id);
   }
 
   async animeEpisodes(animeId: number, season = 1): Promise<TmdbEpisode[]> {
@@ -237,9 +246,44 @@ export class TmdbService {
   // ---------- Internos ----------
 
   private imageBase(): string {
-    // imageBaseUrl vem tipo "https://image.tmdb.org/t/p/w500"
     const url = this.config.get('tmdb')?.imageBaseUrl ?? 'https://image.tmdb.org/t/p';
     return url.replace(/\/w\d+$/, '');
+  }
+
+  private toCatalogItem(item: TmdbItem, type: MediaType): CatalogItemDto {
+    const title = (item.title ?? item.name ?? '').trim();
+    const dateStr = item.release_date ?? item.first_air_date ?? item.air_date ?? '';
+    const releaseYear = dateStr ? Number(dateStr.substring(0, 4)) || null : null;
+    const posterPath = item.poster_path ? `${this.imageBase()}/w500${item.poster_path}` : null;
+    const backdropPath = item.backdrop_path ? `${this.imageBase()}/w1280${item.backdrop_path}` : null;
+
+    return {
+      tmdbId: item.id,
+      title,
+      type,
+      posterUrl: posterPath,
+      backdropUrl: backdropPath,
+      overview: item.overview ?? null,
+      releaseYear,
+    };
+  }
+
+  private toDetail(item: TmdbItem, type: MediaType): CatalogDetailDto {
+    const base = this.toCatalogItem(item, type);
+    let runtime: number | null = null;
+    if (item.runtime) runtime = item.runtime;
+    else if (item.episode_run_time && item.episode_run_time.length > 0) {
+      runtime = item.episode_run_time[0];
+    }
+
+    const genres = (item.genres ?? []).map((g) => g.name);
+
+    return {
+      ...base,
+      runtime,
+      genres: genres.length > 0 ? genres : null,
+      voteAverage: item.vote_average ?? null,
+    };
   }
 
   private async listItems(type: MediaType, path: string, page: number): Promise<PagedResult> {
@@ -270,44 +314,21 @@ export class TmdbService {
   }
 
   private async fetchRaw<T>(path: string, useToken: boolean): Promise<T | null> {
-    const baseUrl = this.config.get('tmdb')!.baseUrl;
+    const tmdbConfig = this.config.get('tmdb');
+    if (!tmdbConfig) return null;
+
+    const baseUrl = tmdbConfig.baseUrl;
     const headers: Record<string, string> = { accept: 'application/json' };
-    if (useToken) {
-      const token = String(this.config.get('tmdb')!.authToken)
-        .replace(/^'|'$/g, '')
-        .trim();
-      headers['Authorization'] = `Bearer ${token}`;
+
+    if (useToken && tmdbConfig.accessToken) {
+      headers['Authorization'] = `Bearer ${tmdbConfig.accessToken}`;
     }
-    return this.http.get<T>(`${baseUrl}${path}`, { headers });
-  }
 
-  private toCatalogItem(item: TmdbItem, type: MediaType): CatalogItemDto {
-    const date = item.release_date || item.first_air_date || null;
-    const year = date ? Number(String(date).slice(0, 4)) : null;
-    return {
-      tmdbId: item.id,
-      title: (item.title || item.name || 'Sem título').trim(),
-      type,
-      posterUrl: item.poster_path ? `${this.imageBase()}/w500${item.poster_path}` : null,
-      backdropUrl: item.backdrop_path ? `${this.imageBase()}/w780${item.backdrop_path}` : null,
-      overview: item.overview || null,
-      releaseYear: Number.isFinite(year) ? (year as number) : null,
-    };
+    try {
+      const response = await this.http.get<T>(`${baseUrl}${path}`, { headers });
+      return response;
+    } catch {
+      return null;
+    }
   }
-
-  private toDetail(item: TmdbItem, type: MediaType): CatalogDetailDto {
-    return {
-      ...this.toCatalogItem(item, type),
-      runtime:
-        (item.runtime && item.runtime > 0 ? item.runtime : null) ??
-        (item.episode_run_time?.length ? item.episode_run_time[0] : null),
-      genres: Array.isArray(item.genres) ? item.genres.map((g) => g.name) : null,
-      voteAverage:
-        typeof item.vote_average === 'number' ? Math.round(item.vote_average * 10) / 10 : null,
-    };
-  }
-}
-
-function tmdbPath(type: MediaType): 'movie' | 'tv' {
-  return type === 'MOVIE' ? 'movie' : 'tv';
 }
