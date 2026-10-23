@@ -75,7 +75,6 @@ export class KitsuService {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  /** Animes mais populares (ordenados por userCount) */
   async topAnime(page = 1): Promise<{ page: number; totalPages: number | null; items: AnimeItemDto[] }> {
     const path = `/anime?sort=-userCount&filter[ageRating]=G,PG,R&${this.pageQuery(page)}`;
     const res = await this.fetch(path);
@@ -83,7 +82,6 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Animes da temporada atual */
   async seasonNow(page = 1) {
     const { season, year } = this.currentSeason();
     const path = `/anime?filter[season]=${season}&filter[seasonYear]=${year}&sort=-userCount&${this.pageQuery(page)}`;
@@ -92,7 +90,6 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Pesquisa de animes por nome */
   async search(q: string, page = 1) {
     const encoded = encodeURIComponent(q.trim());
     const path = `/anime?filter[text]=${encoded}&${this.pageQuery(page)}`;
@@ -101,7 +98,6 @@ export class KitsuService {
     return this.toPaged(res, page);
   }
 
-  /** Detalhes de um anime por kitsuId */
   async detail(id: string): Promise<AnimeItemDto> {
     const res = await this.fetch(`/anime/${id}?include=mappings,genres`);
     if (!res) throw new NotFoundException('Anime não encontrado.');
@@ -111,7 +107,6 @@ export class KitsuService {
     return item;
   }
 
-  /** Episódios de um anime */
   async episodes(id: string, page = 1) {
     const res = await this.fetch(`/anime/${id}/episodes?${this.pageQuery(page)}`);
     if (!res) throw new NotFoundException('Episódios não encontrados.');
@@ -130,9 +125,6 @@ export class KitsuService {
     };
   }
 
-  /**
-   * Método de Streaming direto e fiável para animes
-   */
   async stream(kitsuIdRaw: string, episode: number): Promise<AnimeStreamDto> {
     const kitsuId = String(kitsuIdRaw);
     const kit = await this.fetch(`/anime/${kitsuId}?include=mappings`);
@@ -146,7 +138,7 @@ export class KitsuService {
     const malId = this.extractMalId(...this.splitDocument(kit));
     const targetId = malId || kitsuId;
 
-    // Rota direta de embed de anime baseada em ID MyAnimeList / Kitsu
+    // Rota direta de embed para animes
     const embedUrl = `https://vidsrc.cc/v2/embed/anime/${targetId}/${episode}`;
 
     return {
