@@ -47,6 +47,7 @@ interface KitsuResponse {
 export interface AnimeItemDto {
   kitsuId: string;
   malId: number | null;
+  imdbId: string | null;
   title: string;
   posterUrl: string | null;
   overview: string | null;
@@ -61,6 +62,7 @@ export interface AnimeStreamDto {
   data: {
     kitsuId: string;
     malId: number | null;
+    imdbId: string | null;
     episode: number;
     embedUrl: string;
   };
@@ -135,22 +137,15 @@ export class KitsuService {
 
     const [docs, included] = this.splitDocument(kit);
     const malId = this.extractMalId(docs, included);
+    const imdbId = this.extractImdbId(docs, included);
 
-    // Extrai o IMDb ID para compatibilidade com a API de dublados/legendados do SuperFlix
-    const imdbMapping = included.find(
-      (i) => i.type === 'mappings' && i.attributes?.externalSite?.startsWith('imdb'),
-    );
-    const imdbId = imdbMapping?.attributes?.externalId
-      ? String(imdbMapping.attributes.externalId)
-      : null;
-
+    // Servidor Primário: SuperFlix API (Dublado PT-BR e Legendado por IMDb ID)
     let embedUrl = '';
     if (imdbId) {
-      const cleanImdb = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
-      embedUrl = `https://superflixhd.epizy.com/embed-2/?type=tvshows&imdb=${cleanImdb}`;
+      embedUrl = `https://superflixapi.top/tv/${imdbId}/1/${episode}`;
     } else {
       const fallbackId = malId || kitsuId;
-      embedUrl = `https://vidsrc.pro/embed/tv/${fallbackId}/1/${episode}`;
+      embedUrl = `https://embed.warezcdn.com/serie/${fallbackId}/1/${episode}`;
     }
 
     return {
@@ -158,6 +153,7 @@ export class KitsuService {
       data: {
         kitsuId,
         malId,
+        imdbId,
         episode,
         embedUrl,
       },
@@ -205,6 +201,21 @@ export class KitsuService {
     return id != null ? Number(id) : null;
   }
 
+  private extractImdbId(docs: KitsuResource[], included: KitsuResource[]): string | null {
+    const wanted = new Set<string>();
+    for (const doc of docs) {
+      const rel = doc.relationships?.mappings?.data;
+      for (const ref of Array.isArray(rel) ? rel : [rel]) {
+        if (ref?.type === 'mappings') wanted.add(ref.id);
+      }
+    }
+    const candidates = included.filter((i) => i.type === 'mappings' && wanted.has(i.id));
+    const hit = candidates.find((i) => i.attributes?.externalSite?.startsWith('imdb'));
+    const rawId = hit?.attributes?.externalId ? String(hit.attributes.externalId) : null;
+    if (!rawId) return null;
+    return rawId.startsWith('tt') ? rawId : `tt${rawId}`;
+  }
+
   private toPaged(res: KitsuResponse, page: number) {
     const [docs, included] = this.splitDocument(res);
     const count = res.meta?.count;
@@ -229,6 +240,7 @@ export class KitsuService {
     return {
       kitsuId: doc.id,
       malId: this.extractMalId([doc], included),
+      imdbId: this.extractImdbId([doc], included),
       title: (a.titles?.en || a.titles?.en_us || a.canonicalTitle || a.titles?.en_jp || 'Sem título').trim(),
       posterUrl: a.posterImage?.large || a.posterImage?.medium || a.posterImage?.small || null,
       overview: a.synopsis ?? a.description?.en ?? null,
