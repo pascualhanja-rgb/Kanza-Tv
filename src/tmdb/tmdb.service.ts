@@ -128,6 +128,33 @@ export class TmdbService {
     return this.toDetail(data, 'SERIES');
   }
 
+  // ---------- Animes (TMDB - Animação do Japão) ----------
+
+  async animePopular(page = 1): Promise<PagedResult> {
+    const params = new URLSearchParams({
+      page: String(page),
+      sort_by: 'popularity.desc',
+      include_adult: 'false',
+      with_genres: '16',
+      with_origin_country: 'JP',
+    });
+    return this.listItems('ANIME', `/discover/tv?${params.toString()}`, page);
+  }
+
+  async animeSearch(query: string, page = 1): Promise<PagedResult> {
+    return this.search('ANIME', query, page);
+  }
+
+  async animeDetail(id: number): Promise<CatalogDetailDto> {
+    const data = await this.fetchRaw<TmdbItem>(`/tv/${id}`, true);
+    if (!data) throw new NotFoundException('Anime não encontrado na TMDB.');
+    return this.toDetail(data, 'ANIME');
+  }
+
+  async animeEpisodes(animeId: number, season = 1): Promise<TmdbEpisode[]> {
+    return this.seriesEpisodes(animeId, season);
+  }
+
   // ---------- Novelas (gênero "Soap" da TMDB, idioma original PT) ----------
 
   async soapOperaPopular(page = 1): Promise<PagedResult> {

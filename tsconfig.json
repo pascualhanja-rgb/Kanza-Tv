@@ -11,6 +11,7 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "baseUrl": "./",
     "ignoreDeprecations": "5.0",
     "incremental": true,
