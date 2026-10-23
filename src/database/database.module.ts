@@ -10,8 +10,8 @@ import { WatchHistory } from '../entities/watch-history.entity';
 import { VideoSource } from '../entities/video-source.entity';
 
 /**
- * SQL idempotente que garante o schema (mesma estrutura do schema.sql).
- * Corre no arranque da aplicação — seguro em produção/neon pooler.
+ * SQL idempotente que garante o schema.
+ * Ordem corrigida: 'medias' é criada ANTES de 'video_sources' e 'episodes'.
  */
 const BOOTSTRAP_SQL = `
 DO $$ BEGIN
@@ -22,6 +22,20 @@ DO $$ BEGIN
   CREATE TYPE source_language AS ENUM ('DUB', 'SUB', 'AUTO');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- 1. Criar primeiro a tabela pai 'medias'
+CREATE TABLE IF NOT EXISTS medias (
+    id INT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    type media_type NOT NULL,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    overview TEXT,
+    release_year INT,
+    stream_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Criar tabelas dependentes (video_sources, episodes, watch_histories)
 CREATE TABLE IF NOT EXISTS video_sources (
     id SERIAL PRIMARY KEY,
     media_id INT NOT NULL REFERENCES medias(id) ON DELETE CASCADE,
@@ -32,21 +46,6 @@ CREATE TABLE IF NOT EXISTS video_sources (
     quality VARCHAR(30) NOT NULL DEFAULT 'AUTO',
     url TEXT NOT NULL,
     priority INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_video_sources_media ON video_sources(media_id);
-CREATE INDEX IF NOT EXISTS idx_video_sources_episode
-  ON video_sources (media_id, season_number, episode_number);
-CREATE TABLE IF NOT EXISTS medias (
-    id INT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    type media_type NOT NULL,
-    poster_url TEXT,
-    backdrop_url TEXT,
-    overview TEXT,
-    release_year INT,
-    stream_url TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -86,8 +85,11 @@ CREATE TABLE IF NOT EXISTS watch_histories (
     CONSTRAINT unique_user_media UNIQUE (user_id, media_id)
 );
 
+-- 3. Índices
 CREATE INDEX IF NOT EXISTS idx_medias_type ON medias(type);
 CREATE INDEX IF NOT EXISTS idx_medias_title ON medias(title);
+CREATE INDEX IF NOT EXISTS idx_video_sources_media ON video_sources(media_id);
+CREATE INDEX IF NOT EXISTS idx_video_sources_episode ON video_sources (media_id, season_number, episode_number);
 CREATE INDEX IF NOT EXISTS idx_live_channels_category ON live_channels(category);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_live_channels_stream_url ON live_channels (stream_url);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_episodes_media_season_episode
@@ -115,9 +117,8 @@ export class DatabaseBootstrapService implements OnModuleInit {
         url: config.get('database')!.url,
         ssl: { rejectUnauthorized: false },
         entities: [User, Media, Episode, LiveChannel, WatchHistory, VideoSource],
-        synchronize: false, // schema gerido pelo bootstrap SQL acima
+        synchronize: false,
         logging: ['error', 'warn'],
-        // pool limitado — o pooler do Neon não aceita clientes em excesso
         extra: { max: 10 } as Record<string, unknown>,
       }),
     }),
