@@ -67,6 +67,11 @@ export class TmdbController {
     return this.tmdb.seriesDetail(id);
   }
 
+  @Get('series/:id/seasons')
+  seriesSeasons(@Param('id', ParseIntPipe) id: number) {
+    return this.tmdb.seriesSeasons(id);
+  }
+
   @Get('series/:id/episodes/:season')
   episodes(
     @Param('id', ParseIntPipe) id: number,

@@ -9,6 +9,7 @@ import { TmdbModule } from './tmdb/tmdb.module';
 import { AnimesModule } from './animes/animes.module'; // <-- Correto
 import { IptvModule } from './iptv/iptv.module';
 import { WatchHistoryModule } from './watch-history/watch-history.module';
+import { SourcesModule } from './sources/sources.module';
 import { HealthController } from './health/health.controller';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -29,6 +30,7 @@ import { APP_GUARD } from '@nestjs/core';
     AnimesModule, // <-- Correto
     IptvModule,
     WatchHistoryModule,
+    SourcesModule,
   ],
   controllers: [HealthController],
   providers: [

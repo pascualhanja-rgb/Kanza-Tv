@@ -7,6 +7,7 @@ import { Media } from '../entities/media.entity';
 import { Episode } from '../entities/episode.entity';
 import { LiveChannel } from '../entities/live-channel.entity';
 import { WatchHistory } from '../entities/watch-history.entity';
+import { VideoSource } from '../entities/video-source.entity';
 
 /**
  * SQL idempotente que garante o schema (mesma estrutura do schema.sql).
@@ -17,6 +18,26 @@ DO $$ BEGIN
   CREATE TYPE media_type AS ENUM ('MOVIE', 'SERIES', 'ANIME', 'SOAP_OPERA');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+DO $$ BEGIN
+  CREATE TYPE source_language AS ENUM ('DUB', 'SUB', 'AUTO');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS video_sources (
+    id SERIAL PRIMARY KEY,
+    media_id INT NOT NULL REFERENCES medias(id) ON DELETE CASCADE,
+    season_number INT,
+    episode_number INT,
+    server VARCHAR(100) NOT NULL,
+    language source_language NOT NULL DEFAULT 'AUTO',
+    quality VARCHAR(30) NOT NULL DEFAULT 'AUTO',
+    url TEXT NOT NULL,
+    priority INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_sources_media ON video_sources(media_id);
+CREATE INDEX IF NOT EXISTS idx_video_sources_episode
+  ON video_sources (media_id, season_number, episode_number);
 CREATE TABLE IF NOT EXISTS medias (
     id INT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -93,7 +114,7 @@ export class DatabaseBootstrapService implements OnModuleInit {
         type: 'postgres' as const,
         url: config.get('database')!.url,
         ssl: { rejectUnauthorized: false },
-        entities: [User, Media, Episode, LiveChannel, WatchHistory],
+        entities: [User, Media, Episode, LiveChannel, WatchHistory, VideoSource],
         synchronize: false, // schema gerido pelo bootstrap SQL acima
         logging: ['error', 'warn'],
         // pool limitado — o pooler do Neon não aceita clientes em excesso

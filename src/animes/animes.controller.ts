@@ -37,6 +37,11 @@ export class AnimesController {
     return this.tmdbService.animeDetail(id);
   }
 
+  @Get(':id/seasons')
+  seasons(@Param('id', intPipe('id')) id: number) {
+    return this.tmdbService.seriesSeasons(id);
+  }
+
   @Get(':id/episodes/:season')
   episodes(
     @Param('id', intPipe('id')) id: number,

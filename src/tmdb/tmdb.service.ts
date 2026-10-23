@@ -20,6 +20,12 @@ interface TmdbItem {
   episode_run_time?: number[] | null;
   vote_average?: number | null;
   genres?: Array<{ id: number; name: string }>;
+  seasons?: Array<{
+    season_number?: number | null;
+    name?: string | null;
+    episode_count?: number | null;
+    air_date?: string | null;
+  }>;
 }
 
 interface Paged {
@@ -51,6 +57,13 @@ export interface TmdbEpisode {
   name: string;
   overview: string | null;
   stillPath: string | null;
+  airDate: string | null;
+}
+
+export interface SeasonDto {
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
   airDate: string | null;
 }
 
@@ -128,6 +141,32 @@ export class TmdbService {
     return this.toDetail(data, 'SERIES');
   }
 
+  /**
+   * Lista de temporadas REAIS de uma série, extraída do array `seasons` do
+   * GET /tv/{id} da TMDB. Evita adivinhar temporadas com requests em loop
+   * (que gerava dezenas de 404 e congestionava o processamento).
+   */
+  async seriesSeasons(id: number): Promise<{ tmdbId: number; seasons: SeasonDto[] }> {
+    const data = await this.fetchRaw<TmdbItem>(`/tv/${id}`, true);
+    if (!data) throw new NotFoundException('Série não encontrada.');
+    return {
+      tmdbId: id,
+      seasons: (data.seasons ?? [])
+        .filter((s) => (s.season_number ?? 0) >= 0)
+        .map((s) => ({
+          seasonNumber: s.season_number ?? 0,
+          name: (s.name ?? '').trim(),
+          episodeCount: s.episode_count ?? 0,
+          airDate: s.air_date ?? null,
+        })),
+    };
+  }
+
+  /**
+   * Lista de temporadas REAIS de uma série, extraída do array `seasons` do
+   * GET /tv/{id} da TMDB. Evita adivinhar temporadas com requests em loop
+   * (que gerava dezenas de 404 e congestionava o processamento).
+   */
   // ---------- Animes (TMDB - Animação do Japão) ----------
 
   async animePopular(page = 1): Promise<PagedResult> {
