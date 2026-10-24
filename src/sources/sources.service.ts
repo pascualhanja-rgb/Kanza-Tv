@@ -95,12 +95,13 @@ export class SourcesService {
       };
     }
 
-    // Fallback: embed gerado a partir do TMDB ID (config vidsrc)
-    const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.icu/embed';
+    // Fallback corrigido: URLs de embed direto do VidSrc em vez de parâmetros na raiz
+    const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to';
     const url =
       season !== undefined && episode !== undefined
-        ? `${base}?tmdb=${mediaId}&season=${season}&episode=${episode}`
-        : `${base}?tmdb=${mediaId}`;
+        ? `${base}/embed/tv/${mediaId}/${season}/${episode}`
+        : `${base}/embed/movie/${mediaId}`;
+
     return {
       mediaId,
       season,
@@ -141,11 +142,11 @@ export class SourcesService {
 
     await this.dataSource.query(
       `INSERT INTO medias (id, title, type, poster_url)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE
-         SET title = EXCLUDED.title,
-             type = EXCLUDED.type,
-             poster_url = COALESCE(medias.poster_url, EXCLUDED.poster_url)`,
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (id) DO UPDATE
+          SET title = EXCLUDED.title,
+              type = EXCLUDED.type,
+              poster_url = COALESCE(medias.poster_url, EXCLUDED.poster_url)`,
       [input.mediaId, title, input.mediaType, poster],
     );
   }
