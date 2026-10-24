@@ -95,30 +95,32 @@ export class SourcesService {
       };
     }
 
-    // Fallback corrigido: URLs de embed direto do VidSrc em vez de parâmetros na raiz
-    const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to';
-    const url =
-      season !== undefined && episode !== undefined
-        ? `${base}/embed/tv/${mediaId}/${season}/${episode}`
-        : `${base}/embed/movie/${mediaId}`;
+   // Localiza o bloco de Fallback no método build() dentro do sources.service.ts:
 
-    return {
-      mediaId,
-      season,
-      episode,
-      source: 'vidsrc',
-      sources: [
-        {
-          id: null,
-          server: 'VidSrc',
-          language: 'AUTO',
-          languageLabel: 'Automático',
-          quality: 'HD',
-          url,
-          priority: 0,
-        },
-      ],
-    };
+// Fallback: embed gerado a partir do TMDB/IMDB ID com a estrutura limpa do vidsrc.to
+const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to';
+const url =
+  season !== undefined && episode !== undefined
+    ? `${base}/embed/tv/${mediaId}/${season}/${episode}`
+    : `${base}/embed/movie/${mediaId}`;
+
+return {
+  mediaId,
+  season,
+  episode,
+  source: 'vidsrc',
+  sources: [
+    {
+      id: null,
+      server: 'VidSrc',
+      language: 'AUTO',
+      languageLabel: 'Automático',
+      quality: 'HD',
+      url,
+      priority: 0,
+    },
+  ],
+};
   }
 
   private toDto(r: SourceRow): SourceDto {
