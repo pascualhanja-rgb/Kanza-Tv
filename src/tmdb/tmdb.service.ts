@@ -317,18 +317,32 @@ export class TmdbService {
     const tmdbConfig = this.config.get('tmdb');
     if (!tmdbConfig) return null;
 
-    const baseUrl = tmdbConfig.baseUrl;
     const headers: Record<string, string> = { accept: 'application/json' };
+    const url = `${tmdbConfig.baseUrl}${path}`;
 
     if (useToken && tmdbConfig.accessToken) {
       headers['Authorization'] = `Bearer ${tmdbConfig.accessToken}`;
-    }
-
-    try {
-      const response = await this.http.get<T>(`${baseUrl}${path}`, { headers });
-      return response;
-    } catch {
+      const { data, status } = await this.http.getWithStatus<T>(url, { headers });
+      if (data) return data;
+      // Token inválido/expirado (401/403): tenta a API key v3 antes de desistir
+      if (tmdbConfig.apiKey && (status === 401 || status === 403)) {
+        return this.fetchWithApiKey<T>(path, tmdbConfig.apiKey);
+      }
       return null;
     }
+
+    if (tmdbConfig.apiKey) return this.fetchWithApiKey<T>(path, tmdbConfig.apiKey);
+
+    const { data } = await this.http.getWithStatus<T>(url, { headers });
+    return data;
+  }
+
+  /** Chamada usando a API key v3 da TMDB como query param. */
+  private async fetchWithApiKey<T>(path: string, apiKey: string): Promise<T | null> {
+    const baseUrl = this.config.get('tmdb')?.baseUrl;
+    if (!baseUrl) return null;
+    const sep = path.includes('?') ? '&' : '?';
+    const { data } = await this.http.getWithStatus<T>(`${baseUrl}${path}${sep}api_key=${apiKey}`);
+    return data;
   }
 }
