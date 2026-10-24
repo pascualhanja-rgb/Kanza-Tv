@@ -72,8 +72,14 @@ export class SourcesService {
   ): Promise<SourcesResponseDto> {
     const qb = this.sourcesRepository
       .createQueryBuilder('s')
-      .select(['s.id AS id', 's.server AS server', 's.language AS language',
-        's.quality AS quality', 's.url AS url', 's.priority AS priority'])
+      .select([
+        's.id AS id',
+        's.server AS server',
+        's.language AS language',
+        's.quality AS quality',
+        's.url AS url',
+        's.priority AS priority',
+      ])
       .where('s.media_id = :mediaId', { mediaId });
 
     if (season !== undefined && episode !== undefined) {
@@ -95,32 +101,32 @@ export class SourcesService {
       };
     }
 
-   // Localiza o bloco de Fallback no método build() dentro do sources.service.ts:
+    // Fallback: estrutura padronizada do vidsrc.to
+    // Filme: https://vidsrc.to/embed/movie/{id}
+    // Série: https://vidsrc.to/embed/tv/{id}/{season}/{episode}
+    const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to';
+    const url =
+      season !== undefined && episode !== undefined
+        ? `${base}/embed/tv/${mediaId}/${season}/${episode}`
+        : `${base}/embed/movie/${mediaId}`;
 
-// Fallback: embed gerado a partir do TMDB/IMDB ID com a estrutura limpa do vidsrc.to
-const base = this.config.get('vidsrc')?.baseUrl ?? 'https://vidsrc.to';
-const url =
-  season !== undefined && episode !== undefined
-    ? `${base}/embed/tv/${mediaId}/${season}/${episode}`
-    : `${base}/embed/movie/${mediaId}`;
-
-return {
-  mediaId,
-  season,
-  episode,
-  source: 'vidsrc',
-  sources: [
-    {
-      id: null,
-      server: 'VidSrc',
-      language: 'AUTO',
-      languageLabel: 'Automático',
-      quality: 'HD',
-      url,
-      priority: 0,
-    },
-  ],
-};
+    return {
+      mediaId,
+      season,
+      episode,
+      source: 'vidsrc',
+      sources: [
+        {
+          id: null,
+          server: 'VidSrc',
+          language: 'AUTO',
+          languageLabel: 'Automático',
+          quality: 'HD',
+          url,
+          priority: 0,
+        },
+      ],
+    };
   }
 
   private toDto(r: SourceRow): SourceDto {
@@ -171,11 +177,6 @@ return {
     }
   }
 
-  /**
-   * Upsert por (mediaId, season, episode, server, language): substitui a fonte
-   * dessa combinação pelas enviadas. Idiomas DIFERENTES coexistem no mesmo
-   * servidor (Embed Dublado + Embed Legendado).
-   */
   private async upsertOne(input: UpsertSourceInput): Promise<number> {
     const season = input.seasonNumber ?? null;
     const episode = input.episodeNumber ?? null;
