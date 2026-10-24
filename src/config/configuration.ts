@@ -13,7 +13,7 @@ export const configuration = () => ({
 
   tmdb: {
     apiKey: process.env.TMDB_API_KEY as string,
-    authToken: (process.env.TMDB_AUTH_TOKEN || '').replace(/^'|'$/g, ''),
+    accessToken: (process.env.TMDB_ACCESS_TOKEN || process.env.TMDB_AUTH_TOKEN || '').replace(/^'|'$/g, ''),
     baseUrl: process.env.TMDB_BASE_URL || 'https://api.themoviedb.org/3',
     imageBaseUrl: process.env.TMDB_IMAGE_BASE_URL || 'https://image.tmdb.org/t/p/w500',
     language: process.env.TMDB_LANGUAGE || 'pt-BR',
